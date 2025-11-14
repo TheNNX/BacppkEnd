@@ -1,0 +1,152 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdlib>
+
+namespace std
+{
+    template<typename CharType>
+    struct basic_string
+    {
+    private:
+        size_t m_Size = 0;
+        size_t m_ReservedSize = 0;
+        CharType* m_Buffer = nullptr;
+
+        void ApplySizeChange(size_t newReserve, size_t newSize)
+        {
+            if (m_Buffer == nullptr)
+            {
+                m_Buffer = new CharType[newReserve];
+            }
+            else
+            {
+                auto oldBuffer = m_Buffer;
+                m_Buffer = new CharType[newReserve];
+
+                std::memcpy(m_Buffer, oldBuffer, sizeof(CharType) * m_Size);
+            }
+
+            m_ReservedSize = newReserve;
+            m_Size = newSize;
+        }
+
+        void GrowSize(size_t by)
+        {
+            std::size_t r = 1;
+
+            while (r < m_Size + by)
+            {
+                r *= 2;
+            }
+
+            ApplySizeChange(r, m_Size + by);
+        }
+    public:
+        ~basic_string()
+        {
+            if (m_Buffer != nullptr)
+            {
+                delete[] m_Buffer;
+            }
+        }
+
+        basic_string(const CharType* cStr)
+        {
+            m_ReservedSize = 1;
+            size_t i = 0;
+            
+            while (cStr[i] != 0)
+            {
+                i++;
+            }
+
+            GrowSize(i);
+            std::memcpy(m_Buffer, cStr, sizeof(*cStr) * m_Size);
+        }
+
+        basic_string(const basic_string& other)
+        {
+            m_ReservedSize = other.m_ReservedSize;
+            m_Size = other.m_Size;
+            m_Buffer = new CharType[m_ReservedSize];
+            std::memcpy(m_Buffer, other.m_Buffer, other.size());
+        }
+
+        basic_string(basic_string&& other)
+        {
+            m_ReservedSize = other.m_ReservedSize;
+            m_Size = other.m_Size;
+            m_Buffer = other.m_Buffer;
+            other.m_Buffer = nullptr;
+        }
+
+        const CharType& at(size_t index) const;
+        CharType& at(size_t index);
+        const CharType& operatot[](size_t index) const;
+        CharType& operator[](size_t index);
+
+        const CharType& front() const
+        {
+            return *m_Buffer;
+        }
+
+        CharType& front()
+        {
+            return *m_Buffer;
+        }
+
+        const CharType& back() const
+        {
+            return m_Buffer[m_Size - 1];
+        }
+
+        CharType& back()
+        {
+            return m_Buffer[m_Size - 1];
+        }
+
+        const CharType* c_str() const
+        {
+            return this->m_Buffer;
+        }
+
+        const CharType* data() const
+        {
+            return c_str();
+        }
+
+        std::size_t length() const
+        {
+            return m_Size;
+        }
+
+        std::size_t max_size() const
+        {
+            return __SIZE_MAX__;
+        }
+
+        std::size_t capacity() const
+        {
+            return m_ReservedSize;
+        }
+
+        void reserve(size_t size)
+        {
+
+        }
+
+        std::size_t size() const
+        {
+            return m_Size;
+        }
+
+        bool empty() const
+        {
+            return m_Size == 0;
+        }
+    };
+
+    using string = basic_string<char>;
+    using wstring = basic_string<wchar_t>;
+}

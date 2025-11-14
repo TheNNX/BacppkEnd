@@ -3,6 +3,8 @@
 #include "Http.hpp"
 #include "Html.hpp"
 
+#include <functional>
+
 constexpr std::string_view StylesheetPath = "/styler.css";
 
 struct Styler
@@ -29,12 +31,7 @@ struct Styler
     inline const static CssClass m_MXAuto =
         CssClass("mx-auto");
 
-    HttpResponse operator()(const Request& request)
-    {
-        std::string result = "";
-
-        return HttpResponse(result, 200, "text/css");
-    }
+    HttpResponse operator()(const Request& request);
 };
 
 struct IndexPage
@@ -49,77 +46,16 @@ struct IndexPage
         NavLink(const std::string& href, const std::string& content) :
             m_Href(href), m_Content(content) {}
 
-        operator std::unique_ptr<Tag>() override
-        {
-            auto navLink = std::make_unique<Tag>("div");
-            navLink->Class(Styler::m_NavLink);
-            auto A = navLink->A(m_Href, m_Content);
-            return navLink;
-        }
+        operator std::unique_ptr<Tag>() override;
     };
 
     struct NavBar : Pseudotag
     {
         std::list<std::pair<std::string, std::string>> m_NavBarContents;
 
-        NavBar(std::list<std::pair<std::string, std::string>>&& contents)
-        {
-            m_NavBarContents = std::move(contents);
-        }
+        NavBar(std::list<std::pair<std::string, std::string>>&& contents);
 
-        operator std::unique_ptr<Tag>() override
-        {
-            auto navBar = std::make_unique<Tag>("div");
-            navBar->Class(Styler::m_Div1);
-
-            auto navBarMenuBtn = navBar->Button(
-                "Menu", 
-                "document.getElementById('menu').toggleStatus();");
-            navBarMenuBtn->AddProperty("id", "menuButton");
-            navBarMenuBtn->Class(Styler::m_NavMenuBtn);
-
-            auto navBarPaddingDiv = navBar->Div();
-            navBarPaddingDiv->Class(Styler::m_NavPadding);
-
-            auto navBarHelperDiv = navBar->Div();
-            navBarHelperDiv->Class(CssClass("max-md:hidden w-fit h-fit flex"));
-            for (auto a : m_NavBarContents)
-            {
-                navBarHelperDiv->AddTag(NavLink(a.second, a.first));
-            }
-
-            auto menu = navBar->Div();
-            menu->AddProperty("id", "menu");
-            menu->AddProperty("style", "display: none");
-            menu->Class(Styler::m_Menu);
-            
-            for (auto a : m_NavBarContents)
-            {
-                menu->AddTag(NavLink(a.second, a.first));
-            }
-
-            auto menuShowScript = navBar->Script();
-            menuShowScript->AddContent(
-                "\ndocument.getElementById('menu').getStatus = function(){\n"
-                "   return this.style.display != 'none';\n"
-                "};\n"
-                "document.getElementById('menu').setStatus = function(status){\n"
-                "   if (status) this.style.display = 'block';\n"
-                "   else this.style.display = 'none';\n"
-                "};\n"
-                "document.getElementById('menu').toggleStatus = function(){\n"
-                "   this.setStatus(!this.getStatus());\n"
-                "};\n"
-                "window.addEventListener('click',(evt)=>{\n"
-                "   let menu = document.getElementById('menu');\n"
-                "   let button = document.getElementById('menuButton');\n"
-                "   const path = evt.composedPath();\n"
-                "   if (menu.getStatus() && !path.includes(button))\n"
-                "       menu.setStatus(path.includes(menu));\n"
-                "});");
-
-            return navBar;
-        }
+        operator std::unique_ptr<Tag>() override;
     };
 
     struct Banner : Pseudotag
@@ -129,16 +65,7 @@ struct IndexPage
         Banner(const std::string& title) :
             m_Title(title) {}
 
-        operator std::unique_ptr<Tag>() override
-        {
-            auto banner = std::make_unique<Tag>("div");
-            banner->Class(Styler::m_Banner);
-
-            auto h1 = banner->H1(m_Title);
-            h1->Class(Styler::m_BannerText);
-
-            return banner;
-        }
+        operator std::unique_ptr<Tag>() override;
     };
 
     struct MainContent : Pseudotag
@@ -146,107 +73,20 @@ struct IndexPage
         std::string m_Title;
         std::function<void(Tag*)> m_GenerateContent;
 
-        MainContent(
-            const std::string& title, 
-            const decltype(m_GenerateContent)& generator) :
-            m_Title(title), m_GenerateContent(generator)
+        MainContent(const std::string& title,
+                    const decltype(m_GenerateContent)& generator) :
+            m_Title(title), 
+            m_GenerateContent(generator)
         { }
 
-        operator std::unique_ptr<Tag>() override
-        {
-            auto mainDiv = std::make_unique<Tag>("div");
-            mainDiv->Class(Styler::m_MainContent);
-
-            mainDiv->AddTag(Banner(m_Title));
-
-            auto contentContainer = mainDiv->Div();
-            contentContainer->Class(Styler::m_ContentContainer);
-
-            if (m_GenerateContent != nullptr)
-            {
-                m_GenerateContent(contentContainer);
-            }
-
-            return mainDiv;
-        }
+        operator std::unique_ptr<Tag>() override;
     };
 
-    HttpResponse operator()(const Request& request)
-    {
-        std::string content = "";
-
-        auto html = Tag::Html();
-        auto head = html->Head();
-
-        head->Script("https://cdn.tailwindcss.com");
-        head->Link((std::string) StylesheetPath, "stylesheet");
-
-        TailwindStyleTag* result = head->AddTag(std::make_unique<TailwindStyleTag>());
-
-        result->m_Rules["a:not(.navbar *)"] = { "@apply hover:underline text-blue-800 visited:text-purple-600" };
-
-        result->m_Rules["h1"] = { "@apply text-6xl font-bold mb-2" };
-        result->m_Rules["h2"] = { "@apply text-4xl font-bold mb-2" };
-        result->m_Rules["h3"] = { "@apply text-2xl font-bold mb-2" };
-
-        result->m_Rules["body"] = { "@apply h-full max-h-full bg-zinc-200" };
-
-        result->m_Rules["p"] = { "@apply mb-3" };
-
-        head->Meta()->AddProperty("charset", "UTF-8");
-        head->Title(GetTitle());
-
-        auto metaViewport = head->Meta();
-        metaViewport->AddProperty("name", "viewport");
-        metaViewport->AddProperty("content", "width=device-width, initial-scale=1.0");
-
-        auto body = html->Body();
-       
-        auto navBar = body->AddTag(NavBar(GetNavbar()));
-
-        auto mainContent = 
-            body->AddTag(
-                MainContent(
-                    GetTitle(),
-                    [&](Tag* contentContainer) 
-                    {
-                        this->GenerateContent(contentContainer);
-                    }));
-
-        return HttpResponse(html->Emit(), GetStatus(), "text/html");
-    }
-
-    virtual void GenerateContent(Tag* contentContainer)
-    {
-        auto pages = contentContainer->P("Pages:<br>");
-        auto p = GetNavbar();
-
-        for (auto kv : p)
-        {
-            if (kv.second != "/")
-            {
-                pages->A(kv.second, kv.first);
-                pages->AddContent("<br>");
-            }
-        }
-    }
-
-    virtual std::string GetTitle() const
-    {
-        return "Main page";
-    }
-
-    virtual std::list<std::pair<std::string, std::string>> GetNavbar() const
-    {
-        return {
-            {"Main page", "/"}
-        };
-    }
-
-    virtual int GetStatus()
-    {
-        return 200;
-    }
+    HttpResponse operator()(const Request& request);
+    virtual void GenerateContent(Tag* contentContainer);
+    virtual std::string GetTitle() const;
+    virtual std::list<std::pair<std::string, std::string>> GetNavbar() const;
+    virtual int GetStatus();
 };
 
 struct CenteredFocusImg : Pseudotag
@@ -257,12 +97,11 @@ struct CenteredFocusImg : Pseudotag
     std::string m_Width = "";
     std::string m_Height = "";
 
-    CenteredFocusImg(
-        const std::string& src,
-        const std::string& subtitle,
-        const std::string& alt = "",
-        const std::string& width = "",
-        const std::string& height = "") :
+    CenteredFocusImg(const std::string& src,
+                     const std::string& subtitle,
+                     const std::string& alt = "",
+                     const std::string& width = "",
+                     const std::string& height = "") :
         m_Src(src), 
         m_Subtitle(subtitle), 
         m_Alt(alt), 
@@ -271,13 +110,5 @@ struct CenteredFocusImg : Pseudotag
     {
     }
 
-    operator std::unique_ptr<Tag>() override
-    {
-        auto div = std::make_unique<Tag>("div");
-        auto img = div->Img(m_Src, m_Alt, m_Width, m_Height);
-        img->Class(Styler::m_MXAuto);
-        div->H4(m_Subtitle)->Class("text-center bold");
-
-        return div;
-    }
+    operator std::unique_ptr<Tag>() override;
 };

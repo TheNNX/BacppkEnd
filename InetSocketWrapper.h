@@ -89,6 +89,11 @@ namespace InetSocketWrapper
                 return true;
             return port < other.port;
         }
+
+        std::string ToString() const
+        {
+            return host + ":" + std::to_string(port);
+        }
     };
 
     class InetSocket

@@ -144,6 +144,12 @@ public:
         std::string result = "";
         for (auto kv : m_Properties)
         {
+			if (kv.second == "")
+			{
+				result += " " + kv.first;
+				continue;
+			}
+			
             result += " " + kv.first + "=\"" + kv.second + "\"";
         }
 
@@ -155,7 +161,7 @@ public:
         return result;
     }
 
-    void AddProperty(const std::string& name, const std::string& value)
+    void AddProperty(const std::string& name, const std::string& value = "")
     {
         m_Properties.push_back(std::make_pair(name, value));
     }
@@ -426,7 +432,7 @@ inline InnerHtml::operator std::string() const
 
     for (auto& child : m_Tag->m_Children)
     {
-        result += child->Emit();
+        result += child->Emit() + "\n";
     }
 
     return result;

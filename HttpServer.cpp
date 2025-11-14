@@ -10,380 +10,273 @@
 #include <functional>
 #include <math.h>
 #include <thread>
-
-#define CLIENT_BUFFER_SIZE 8192
+#include <assert.h>
 
 #include "Html.hpp"
-#include "inet-socket-wrapper.h"
+#include "InetSocketWrapper.h"
+
+#include "HttpServer.hpp"
+#include "FileResponder.hpp"
 
 #include "IndexPage.hpp"
+#include "UploadPage.hpp"
 #include "ErrorPage.hpp"
+#include "UploadApi.hpp"
 
-using namespace InetSocketWrapper;
-
-struct FileResponder
+HttpService::HttpService(const std::string& interfce, uint16_t port, InternetProtocol protocol) :
+    m_ServerSocket(protocol, TCP)
 {
-    std::string m_File;
-    std::string m_MimeType;
+    SocketAddress addr = { interfce.c_str(), port };
 
-    FileResponder(
-        const std::string& file, 
-        const std::string& mimeType = "") :
-        m_File(file), m_MimeType(mimeType) 
+    std::cout << "[*] Binding... ";
+    if (!m_ServerSocket.Bind(addr))
     {
-        if (mimeType == "")
-        {
-            m_MimeType = "application/octet-stream";
-
-            const std::map<std::string, std::string> mimeMapping = 
-            {
-                { ".png", "image/png" },
-                { ".jpg", "image/jpeg" },
-                { ".jpeg", "image/jpeg" },
-                { ".txt", "text/plain" },
-                { ".c", "text/plain" },
-                { ".cpp", "text/plain" },
-                { ".h", "text/plain" },
-                { ".hpp", "text/plain" },
-                { "Makefile", "text/plain" },
-                { "makefile", "text/plain" },
-                { ".html", "text/html" },
-                { ".htm", "text/html" },
-                { ".zip", "application/zip" }
-            };
-
-            auto toupper = [](std::string str) -> std::string
-                { 
-                    std::transform(str.begin(), str.end(), str.begin(), ::toupper); 
-                    return str;
-                };
-
-            for (auto kv : mimeMapping)
-            {
-                if (toupper(file).ends_with(toupper(kv.first)))
-                {
-                    m_MimeType = kv.second;
-                    break;
-                }
-            }
-        }
+        std::cerr << "ERROR" << std::endl << "[!!] Bind failed" << std::endl;
+        exit(EXIT_FAILURE);
     }
+    std::cout << "OK" << std::endl;
 
-    HttpResponse operator()(const Request& request)
-    {
-        std::ifstream file(m_File, std::ios::binary | std::ios::ate);
-        std::string content = "";
+    m_ServerSocket.Listen(10);
 
-        int sizeLeft = file.tellg();
+    std::cout << "[*] Listening on [" << addr.host << ':' << addr.port << ']' << std::endl;
+}
 
-        if (sizeLeft < 0)
+std::thread HttpService::Run()
+{
+    auto runService = [&]()
         {
-            throw std::runtime_error("FileResponder couldn't locate file " + this->m_File);
-        }
+            std::cout << "[S] Service '" << m_Name << "' initializing\n";
 
-        file.seekg(file.beg);
-        auto method = request.m_Method;
-
-        struct Promise : ContentPromise
-        {
-            const Request& request;
-            int sizeLeft;
-            std::ifstream file;
-
-            Promise(const Request& request, int sizeLeft, std::ifstream&& file) :
-                request(request), sizeLeft(sizeLeft), file(std::move(file)) {}
-
-            std::string Fulfill() override
+            while (true)
             {
-                char buffer[CLIENT_BUFFER_SIZE] = { 0 };
-                std::string result = "";
-
-                if (request.m_Method == "GET")
+                try
                 {
-                    while (sizeLeft > 0)
-                    {
-                        auto currentSize = std::min(sizeLeft, CLIENT_BUFFER_SIZE);
-                        file.read(buffer, currentSize);
-                        sizeLeft -= currentSize;
-                        
-                        result += std::string(buffer, buffer + currentSize);
-                    }
-                }
+                    SocketAddress clientAddress;
 
-                return result;
+                    auto clientSocket = m_ServerSocket.AcceptConnection(clientAddress);
+                    std::cout << "[+] New connection: [" << clientAddress.host << ':';
+                    std::cout << clientAddress.port << ']' << std::endl;
+
+                    HttpClientWorker worker(
+                        Connection{ std::move(clientSocket), clientAddress, m_SslContext },
+                        *this);
+                }
+                catch (const std::runtime_error& rerror)
+                {
+                    std::cerr << "[E] " << rerror.what() << "\n";
+                }
+                catch (...)
+                {
+                    std::cerr << "[E] Unknown error.\n";
+                }
             }
         };
 
-        auto resp = HttpResponse(std::make_unique<Promise>(request, sizeLeft, std::move(file)), 200, m_MimeType);
-        resp.m_Headers["Content-Length"] = std::to_string(sizeLeft);
-        return resp;
-    }
-};
+    return std::thread(runService);
+}
 
-using Responder = std::function<HttpResponse(const Request& request)>;
-
-struct HttpService;
-struct Alias
+HttpResponse HttpService::GetResponse(const Request& request) const
 {
-    std::string m_To;
-    HttpService& m_Service;
+    assert(request.m_ResourceId.GetPathParts().size() > 0);
+    std::vector<std::string> pathParts = request.m_ResourceId.GetPathParts();
 
-    Alias(HttpService& service, const std::string& to) : 
-        m_To(to), m_Service(service) {}
+    std::cout << "[G] " << request.m_Method << " Request for " + request.m_ResourceId.m_Path + " using " << request.m_Protocol << "\n";
 
-    HttpResponse operator()(const Request& request);
-};
-
-struct Redirect
-{
-    std::string m_To;
-
-    Redirect(const std::string& to) : m_To(to) {}
-
-    HttpResponse operator()(const Request& request)
+    if (m_Responders.count(request.m_Method) == 0)
     {
-        HttpResponse response("Moved to " + m_To, 301);
-        response.m_Headers["Location"] = m_To;
-        return response;
+        return ErrorPage(501)(request);
     }
-};
 
-std::atomic<int> g_NumThreads = 0;
-
-struct HttpService
-{
-    InetSocket m_ServerSocket;
-    std::string m_Name;
-    std::map<std::string, std::map<std::string, Responder>> m_Responders;
-    std::map<std::string, Responder> m_FallbackResponders = 
-    { 
-        { "GET", ErrorPage(404) },
-    };
-    Responder m_GeneralFallbackResponder = ErrorPage(404);
-    std::unique_ptr<SslContext> m_SslContext = nullptr;
-
-    HttpService(const std::string& interfce, uint16_t port = 80, InternetProtocol protocol = IPv4) :
-        m_ServerSocket(protocol, TCP)
+    if (m_Responders.at(request.m_Method).count(pathParts[0]) == 0)
     {
-        SocketAddress addr = { interfce.c_str(), port};
+        return ErrorPage(404)(request);
+    }
 
-        std::cout << "[*] Binding... ";
-        if (!m_ServerSocket.Bind(addr))
+    auto responderIt = m_Responders.at(request.m_Method).find(pathParts[0]);
+
+    const Responder* responder = responderIt == m_Responders.at(request.m_Method).end() ?
+        nullptr : 
+        &responderIt->second;
+
+    for (size_t i = 1; i < pathParts.size() && responder != nullptr; i++)
+    {
+        responder = responder->GetChild(pathParts[i]);
+    }
+
+    if (responder == nullptr)
+    {
+        if (m_FallbackResponders.count(request.m_Method) > 0)
         {
-            std::cerr << "ERROR" << std::endl << "[!!] Bind failed" << std::endl;
-            exit(EXIT_FAILURE);
+            return m_FallbackResponders.at(request.m_Method)(request);
         }
-        std::cout << "OK" << std::endl;
 
-        m_ServerSocket.Listen(10);
-
-        std::cout << "[*] Listening on [" << addr.host << ':' << addr.port << ']' << std::endl;
+        return m_GeneralFallbackResponder(request);
     }
 
-    std::thread Run()
+    try
     {
-        auto runService = [&]()
-            {
-                std::cout << "[S] Service '" << m_Name << "' initializing\n";
+        return responder->m_Respond(request);
+    }
+    catch (const std::runtime_error& e)
+    {
+        return ErrorPage(500)(request);
+    }
+}
 
-                while (true)
-                {
-                    try
-                    {
-                        SocketAddress clientAddress;
-                        auto clientSocket = m_ServerSocket.AcceptConnection(clientAddress);
-                        std::cout << "[+] New connection: [" << clientAddress.host << ':';
-                        std::cout << clientAddress.port << ']' << std::endl;
+ResourceIdentifier::ResourceIdentifier(const std::string& ri)
+{
+    auto queryIt = std::find(ri.begin(), ri.end(), '?');
+ 
+    std::string queryString;
 
-                        this->HandleClient({ Connection{ std::move(clientSocket), m_SslContext } });
-                    }
-                    catch (const std::runtime_error& rerror)
-                    {
-                        std::cerr << "[E] " << rerror.what() << "\n";
-                    }
-                    catch (...)
-                    {
-                        std::cerr << "[E] Unknown error.\n";
-                    }
-                }
-            };
-
-        return std::thread(runService);
+    m_Path = std::string(ri.begin(), queryIt);
+    if (queryIt == ri.end())
+    {
+        return;
     }
 
-    void HandleClient(Request&& request)
+    queryString = std::string(queryIt + 1, ri.end());
+
+    auto queryParts = SplitString(queryString, '&');
+    for (auto& queryPart : queryParts)
     {
-        static const auto getResponse = [&](const Request& request) -> std::string
-            {
-                HttpResponse response = HttpResponse("", 500, "text/plain");
+        std::string key, value;
+        auto eqSignIt = std::find(queryPart.begin(), queryPart.end(), '=');
 
-                auto spaceFirst = request.m_Body.find(' ');
-                if (spaceFirst != std::string::npos)
-                {
-                    std::string method = std::string(
-                        request.m_Body.begin(),
-                        request.m_Body.begin() + spaceFirst);
-
-                    std::transform(method.begin(), method.end(), method.begin(), ::toupper);
-
-                    std::string skipMethod = std::string(
-                        request.m_Body.begin() + method.length() + 1,
-                        request.m_Body.end());
-
-                    request.m_Method = method;
-
-                    auto it = std::find(skipMethod.begin(), skipMethod.end(), ' ');
-                    std::string path = std::string(skipMethod.begin(), it);
-                    std::string protocol = std::string(it + 1, skipMethod.end());
-
-                    if (!protocol.starts_with("HTTP"))
-                    {
-                        return "";
-                    }
-
-                    std::cout << "[G] " << method << " Request for " + path + " using " +
-                        protocol.substr(0, protocol.find("\r\n")) << "\n";
-
-                    if (m_Responders.count(method) == 0)
-                    { 
-                        response = ErrorPage(501)(request);
-                    }
-                    else
-                    {
-
-                        auto responderIt = m_Responders.at(method).find(path);
-                        if (responderIt == m_Responders.at(method).end())
-                        {
-                            if (m_FallbackResponders.count(method) > 0)
-                            {
-                                response = m_FallbackResponders.at(method)(request);
-                            }
-                            else
-                            {
-                                response = m_GeneralFallbackResponder(request);
-                            }
-                        }
-                        else
-                        {
-                            try
-                            {
-                                response = responderIt->second(request);
-                            }
-                            catch (const std::runtime_error& e)
-                            {
-                                response = ErrorPage(500)(request);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    response = ErrorPage(501)(request);
-                }
-
-                if (request.m_Method == "HEAD")
-                {
-                    return response.GetResponseHeader();
-                }
-                return
-                    response.GetResponseHeader() +
-                    response.GetContent() + "\r\n";
-            };
-
-        struct WorkerCounterAcquirer
+        if (eqSignIt == queryPart.end())
         {
-            WorkerCounterAcquirer()
-            {
-                g_NumThreads++;
-            }
+            value = "";
+            key = queryPart;
+        }
+        else 
+        {
+            value = std::string(eqSignIt + 1, queryPart.end());
+            key = std::string(queryPart.begin(), eqSignIt);
+        }
 
-            ~WorkerCounterAcquirer()
-            {
-                g_NumThreads--;
-            }
-        };
-
-        auto workerFunction = [](Request&& requestR)
-            {
-                Request request = Request(std::move(requestR));
-                std::string data = "";
-                WorkerCounterAcquirer acquirer;
-
-                std::cout << g_NumThreads << " threads started\n";
-
-                auto headersEnd = std::string::npos;
-                size_t contentLeft = 0;
-
-                std::map<std::string, std::string> headerMap;
-
-                while (
-                    headersEnd == std::string::npos &&
-                    !request.m_Connection.Bad() &&
-                    !request.m_Connection.Eof())
-                {
-                    data += request.m_Connection.ReceiveString();
-                    if (headersEnd == std::string::npos)
-                    {
-                        headersEnd = data.find("\r\n\r\n");
-                    }
-                }
-
-                std::string headers = data.substr(0, headersEnd);
-
-                std::stringstream sstream(headers);
-                std::string line;
-                while (std::getline(sstream, line))
-                {
-                    auto pos = line.find_first_of(':');
-                    if (pos != std::string::npos)
-                    {
-                        std::string name = line.substr(0, pos);
-                        std::string value = std::string(line.begin() + pos + 1, line.end());
-
-                        auto trim = [](std::string value)
-                            {
-                                while (value.starts_with(' '))
-                                {
-                                    value = value.substr(1);
-                                }
-                                while (value.ends_with(' '))
-                                {
-                                    value = value.substr(0, value.length() - 1);
-                                }
-
-                                return value;
-                            };
-
-                        name = trim(name);
-                        value = trim(value);
-
-                        headerMap[name] = value;
-
-                        if (name == "Content-Length")
-                        {
-                            std::stringstream(value) >> contentLeft;
-                        }
-                    }
-                }
-
-                contentLeft -= data.length() - headers.length() - 4;
-                while (contentLeft > 0)
-                {
-                    std::string got = request.m_Connection.ReceiveString(std::min(contentLeft, (size_t)4096));
-                    contentLeft -= got.length();
-                    data += got;
-                }
-
-                request.m_Body = data;
-                request.m_RequestHeaders = std::move(headerMap);
-                std::string result = getResponse(request);
-                request.m_Connection.SendString(result);
-            };
-
-        std::thread workerThread = std::thread(workerFunction, std::move(request));
-        workerThread.detach();
+        m_Query[key].push_back(value);
     }
-};
+
+    std::cout << m_Query.size() << " query keys\n";
+}
+
+void HttpClientWorker::WorkerFunction(Connection&& originalConnection)
+{
+    Connection connection = std::move(originalConnection);
+    std::string data = "";
+    WorkerCounterAcquirer acquirer;
+
+    std::cout << WorkerCounterAcquirer::GetNumberOfThreadsRef() << " threads started\n";
+
+    auto headersEnd = std::string::npos;
+    size_t contentLeft = 0;
+
+    std::map<std::string, std::string> headerMap;
+
+    while (headersEnd == std::string::npos &&
+        !connection.Bad() &&
+        !connection.Eof())
+    {
+        data += connection.ReceiveString();
+        if (headersEnd == std::string::npos)
+        {
+            headersEnd = data.find("\r\n\r\n");
+        }
+    }
+
+    if (headersEnd == std::string::npos)
+    {
+        /* Ignore empty requests, browsers establish connections "in advance" when
+           typing to decrease load times. When the address later changes, the
+           connection is closed not having sent any data. */
+        if (data.length() == 0)
+        {
+            return;
+        }
+        std::cerr << "Got an invalid request from " << connection.GetAddress().ToString() << "\n";
+        return;
+    }
+
+    std::string headers = data.substr(0, headersEnd);
+
+    std::stringstream sstream(headers);
+    std::string line;
+    while (std::getline(sstream, line))
+    {
+        auto pos = line.find_first_of(':');
+        if (pos != std::string::npos)
+        {
+            std::string name = line.substr(0, pos);
+            std::string value = std::string(line.begin() + pos + 1, line.end());
+
+            name = Trim(name);
+            value = Trim(value);
+
+            headerMap[name] = value;
+
+            if (name == "Content-Length")
+            {
+                std::stringstream(value) >> contentLeft;
+            }
+        }
+    }
+
+    contentLeft -= data.length() - headers.length() - 4;
+    while (contentLeft > 0)
+    {
+        std::string got = connection.ReceiveString(std::min(contentLeft, (size_t)4096));
+        contentLeft -= got.length();
+        data += got;
+    }
+
+    auto spaceFirst = data.find(' ');
+    if (spaceFirst == std::string::npos)
+    {
+        return;
+    }
+    std::string method = std::string(
+        data.begin(),
+        data.begin() + spaceFirst);
+
+    std::transform(method.begin(), method.end(), method.begin(), ::toupper);
+
+    std::string skipMethod =
+        std::string(
+            data.begin() + method.length() + 1,
+            data.end());
+
+    auto it = std::find(skipMethod.begin(), skipMethod.end(), ' ');
+
+    // TODO: Decode fragment and query parts of the request
+    ResourceIdentifier resourceId(std::string(skipMethod.begin(), it));
+    std::string protocol = std::string(it + 1, skipMethod.end());
+
+    if (!protocol.starts_with("HTTP"))
+    {
+        return;
+    }
+
+    protocol = protocol.substr(0, protocol.find("\r\n"));
+
+    Request request(std::move(connection));
+
+    request.m_Data = data;
+    request.m_ResourceId = resourceId;
+    request.m_Method = method;
+    request.m_Protocol = protocol;
+    request.m_RequestHeaders = std::move(headerMap);
+    request.m_Body = std::string_view(data.begin() + headersEnd + 4, data.end());
+
+    HttpResponse response = m_Service.GetResponse(request);
+    if (request.m_Method == "HEAD")
+    {
+        request.m_Connection.SendString(response.GetResponseHeader());
+    }
+    else
+    {
+        request.m_Connection.SendString(response.GetResponse());
+    }
+}
 
 struct LoginApi
 {
@@ -395,33 +288,27 @@ struct LoginApi
 
 int main()
 {
-    HttpService httpsService = HttpService("0.0.0.0", 3443);
-    httpsService.m_SslContext = std::make_unique<SslContext>(
-        "server.crt",
-        "server.key");
-    httpsService.m_Responders["GET"] =
+    HttpService httpService = HttpService("0.0.0.0", 80);
+    httpService.m_Responders["GET"] =
     {
         { "/", IndexPage() },
-        { "/index.html", Alias(httpsService, "/") },
-        { "/robots.txt", FileResponder("robots.txt", "text/plain") },
-        { (std::string) StylesheetPath, Styler() }
+        { "/index.html", Alias(httpService, "/") },
+        { "/upload.html", UploadImagePage() },
+        { "/frontend.wasm", FileResponder("x64/Debug/Frontend.wasm") },
+        { "/loadwasm.js", FileResponder("loadwasm.js") },
     };
-    httpsService.m_Responders["POST"] =
-    {
-        { "/api/login", LoginApi() }
-    };
-    std::thread t1 = httpsService.Run();
 
-    HttpService httpRedirector = HttpService("0.0.0.0", 3080);
-    httpRedirector.m_Responders["GET"] =
-    {
-        /* TODO */
-    };
-    httpRedirector.m_GeneralFallbackResponder = Alias(httpRedirector, "/");
-    //std::thread t2 = httpRedirector.Run();
+    httpService.m_Responders["GET"]["/loadwasm.js"].m_Children["test"] = IndexPage();
 
-    t1.join();
-    //t2.join();
+	httpService.m_Responders["POST"] = 
+	{
+		{ "/upload", UploadApi() },
+        { "/uploadFile", UploadFileApi() },
+	};
+    httpService.m_GeneralFallbackResponder = Alias(httpService, "/");
+    std::thread t2 = httpService.Run();
+
+    t2.join();
 
     return 0;
 }

@@ -4,7 +4,10 @@
 #include <time.h>
 #include <map>
 #include <memory>
-#include "inet-socket-wrapper.h"
+
+#include "StringHelper.hpp"
+
+#include "InetSocketWrapper.h"
 #include "Https.hpp"
 
 namespace InetSocketWrapper
@@ -12,12 +15,28 @@ namespace InetSocketWrapper
     class InetSocket;
 }
 
+struct ResourceIdentifier
+{
+    std::string m_Path;
+    std::map<std::string, std::vector<std::string>> m_Query;
+
+    std::vector<std::string> GetPathParts() const
+    {
+        return SplitString(m_Path, '/');
+    }
+
+    ResourceIdentifier(const std::string& ri);
+    ResourceIdentifier() = default;
+};
+
 struct Connection
 {
     Connection(
         InetSocketWrapper::InetSocket&& socket,
+        InetSocketWrapper::SocketAddress clientAddress,
         std::unique_ptr<SslContext>& sslContext) :
-        m_ClientSocket(std::move(socket))
+        m_ClientSocket(std::move(socket)),
+        m_ClientAddress(clientAddress)
     {
         if (sslContext != nullptr)
         {
@@ -30,8 +49,13 @@ struct Connection
     bool Eof();
     void SendString(const std::string& str);
     std::string ReceiveString(size_t len = 8192);
+    InetSocketWrapper::SocketAddress GetAddress() 
+    {
+        return this->m_ClientAddress;
+    }
 private:
     InetSocketWrapper::InetSocket m_ClientSocket;
+    const InetSocketWrapper::SocketAddress m_ClientAddress;
     std::unique_ptr<SslConnection> m_SslConnection = nullptr;
 };
 
@@ -39,14 +63,17 @@ struct Request
 {
     Request(
         Connection&& connection) :
-        m_Connection(std::move(connection)), m_Body("")
+        m_Connection(std::move(connection)), m_Data("")
     {
     }
 
-    std::string m_Body;
+    std::string m_Data;
     Connection m_Connection;
+    std::string_view m_Body;
+    ResourceIdentifier m_ResourceId;
+    std::string m_Protocol;
     std::map<std::string, std::string> m_RequestHeaders;
-    mutable std::string m_Method = "";
+    std::string m_Method = "";
 };
 
 inline std::string StringifyHttpCode(int code)
@@ -133,7 +160,7 @@ public:
     inline HttpResponse(T&& content, int httpCode, const std::string& contentType) :
         HttpResponse(std::forward<T>(content), httpCode)
     {
-        m_Headers["Conent-Type"] = contentType;
+        m_Headers["Content-Type"] = contentType;
         m_Headers["Connection"] = "close";
     }
 
@@ -177,6 +204,11 @@ public:
         result += "\r\n";
 
         return result;
+    }
+
+    inline std::string GetResponse()
+    {
+        return GetResponseHeader() + GetContent() + "\r\n";
     }
 };
 

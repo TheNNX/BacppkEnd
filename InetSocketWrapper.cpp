@@ -31,7 +31,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include "inet-socket-wrapper.h"
+#include "InetSocketWrapper.h"
 
 #ifdef _WIN32
 
@@ -387,18 +387,14 @@ namespace InetSocketWrapper
 
     bool InetSocket::Bind(SocketAddress addr)
     {
-        char port[6];
-        snprintf(port, 6, "%d", addr.port);
-
-        return BindToAddress(addr.host.c_str(), port);
+        return BindToAddress(addr.host.c_str(), 
+                             std::to_string((unsigned)addr.port).c_str());
     }
 
     bool InetSocket::Connect(SocketAddress addr)
     {
-        char port[6];
-        snprintf(port, 6, "%d", addr.port);
-
-        return ConnectToRemote(addr.host.c_str(), port);
+        return ConnectToRemote(addr.host.c_str(), 
+                               std::to_string((unsigned)addr.port).c_str());
     }
 
     void InetSocket::Listen(int backlog)
@@ -476,7 +472,7 @@ namespace InetSocketWrapper
         int result = Receive(buf, len, flags);
         if (result)
         {
-            std::string s((const char*) buf);
+            std::string s(buf, buf + result);
             buffer = s;
         }
 

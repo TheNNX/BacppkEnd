@@ -2,7 +2,7 @@
 
 #include <openssl/tls1.h>
 #include <openssl/ssl.h>
-#include "inet-socket-wrapper.h"
+#include "InetSocketWrapper.h"
 #include <stdexcept>
 
 struct SslContext;
