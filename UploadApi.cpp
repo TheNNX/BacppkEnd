@@ -9,6 +9,8 @@
 #include <iostream>
 #include <span>
 #include <assert.h>
+#include <queue>
+
 #include "ErrorPage.hpp"
 
 using namespace std::filesystem;
@@ -19,8 +21,8 @@ struct OngoingFileTransfer
     path m_Path;
     std::ofstream m_OutStream;
 
-    size_t m_SizeTotal;
-    size_t m_SizeLeft;
+    size_t m_SizeTotal = 0;
+    size_t m_SizeLeft = 0;
 
     /* TODO: create a worker to trim this */
     std::chrono::time_point<std::chrono::file_clock> m_ExpirationDate;
@@ -56,28 +58,87 @@ struct OngoingFileTransfer
 namespace TransferRegistry 
 {
     using TransferId = int;
-    std::map<TransferId, OngoingFileTransfer> g_Transfers;
-    std::mutex m_Mutex;
+    std::map<TransferId, OngoingFileTransfer> Transfers;
+    std::mutex Mutex;
+
+    auto GetNextTimeout()
+    {
+        std::lock_guard lock(Mutex);
+
+        /* If there are no ongnoing transfers, wait for one minute. 
+           TODO: This should probably wait on a semaphore instead,
+           though it's not very critical code. */
+        if (Transfers.size() == 0)
+        {
+            return std::chrono::file_clock::now() + std::chrono::minutes(1);
+        }
+
+        decltype(OngoingFileTransfer::m_ExpirationDate) nextTimeout =
+            Transfers.begin()->second.m_ExpirationDate;
+
+        for (auto& transfer : Transfers)
+        {
+            if (transfer.second.m_ExpirationDate < nextTimeout)
+            {
+                nextTimeout = transfer.second.m_ExpirationDate;
+            }
+        }
+
+        return nextTimeout;
+    }
+
+    std::thread CleanupThread = []() -> std::thread&&
+        {
+            std::thread t([]()
+                {
+                    while (true)
+                    {
+                        
+                        std::this_thread::sleep_until(GetNextTimeout());
+
+                        std::queue<TransferId> toRemove;
+
+                        std::lock_guard lock(Mutex);
+                        for (auto it = Transfers.begin(); it != Transfers.end(); it++)
+                        {
+                            if (it->second.IsExpired())
+                            {
+                                toRemove.push(it->first);
+                            }
+                        }
+
+                        while (toRemove.empty() == false)
+                        {
+                            auto key = toRemove.front();
+                            Transfers.erase(key);
+                            toRemove.pop();
+                        }
+                    }
+                });
+
+            t.detach();
+            return std::move(t);
+        }();
 
     std::pair<TransferId, OngoingFileTransfer&> AddTransfer(path path, size_t size)
     {
-        std::scoped_lock lock(m_Mutex);
+        std::scoped_lock lock(Mutex);
 
         TransferId id;
         do
         {
             id = rand();
         } 
-        while (id == 0 || g_Transfers.count(id) > 0);
+        while (id == 0 || Transfers.count(id) > 0);
     
-        g_Transfers[id] = OngoingFileTransfer(path, size);
-        return std::pair<TransferId, OngoingFileTransfer&>(id, g_Transfers[id]);
+        Transfers[id] = OngoingFileTransfer(path, size);
+        return std::pair<TransferId, OngoingFileTransfer&>(id, Transfers[id]);
     }
 };
 
 HttpResponse UploadFileApi::operator()(const Request& request)
 {
-    std::scoped_lock<std::mutex> lock(TransferRegistry::m_Mutex);
+    std::scoped_lock<std::mutex> lock(TransferRegistry::Mutex);
 
     if (request.m_ResourceId.m_Query.count("id") == 0)
     {
@@ -87,16 +148,16 @@ HttpResponse UploadFileApi::operator()(const Request& request)
     int id = std::stoi(request.m_ResourceId.m_Query.at("id")[0]);
 
     /* TODO: return 403 if session is not the owner for this id */
-    if (TransferRegistry::g_Transfers.count(id) == 0)
+    if (TransferRegistry::Transfers.count(id) == 0)
     {
         return ErrorPage(403)(request);
     }
 
-    auto it = TransferRegistry::g_Transfers.find(id);
+    auto it = TransferRegistry::Transfers.find(id);
     auto& transfer = it->second;
     if (transfer.IsExpired())
     {
-        TransferRegistry::g_Transfers.erase(it);
+        TransferRegistry::Transfers.erase(it);
     }
 
     size_t step = std::min(request.m_Body.size(), transfer.m_SizeLeft);
@@ -107,7 +168,7 @@ HttpResponse UploadFileApi::operator()(const Request& request)
     transfer.m_OutStream.flush();
     if (transfer.m_SizeLeft == 0)
     {
-        TransferRegistry::g_Transfers.erase(it);
+        TransferRegistry::Transfers.erase(it);
     }
 
     /* TODO: error handling */
