@@ -19,6 +19,7 @@ using namespace InetSocketWrapper;
 struct Responder
 {
     std::function<HttpResponse(const Request& request)> m_Respond;
+    std::function<const Responder*(const std::string&)> m_ChildrenOverride = nullptr;
     std::map<std::string, Responder> m_Children;
 
     HttpResponse operator()(const Request& request) const
@@ -33,6 +34,10 @@ struct Responder
 
     const Responder* GetChild(const std::string& name) const
     { 
+        if (m_ChildrenOverride != nullptr)
+        {
+            return m_ChildrenOverride(name);
+        }
         if (m_Children.count(name) == 0)
         {
             return nullptr;
@@ -98,8 +103,8 @@ struct HttpService
 struct HttpClientWorker
 {
     const HttpService& m_Service;
-    std::thread m_Thread;
     std::binary_semaphore m_Semaphore = std::binary_semaphore(0);
+    std::thread m_Thread;
 
     HttpClientWorker(Connection&& connection, const HttpService& service) :
         m_Service(service), 

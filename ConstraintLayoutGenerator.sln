@@ -3,12 +3,12 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36414.22
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ConstraintLayoutGenerator", "ConstraintLayoutGenerator.vcxproj", "{2D3A0BD5-6F2D-4FBB-95BD-7982A7082B2E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "server", "server\server.vcxproj", "{2D3A0BD5-6F2D-4FBB-95BD-7982A7082B2E}"
 	ProjectSection(ProjectDependencies) = postProject
 		{DB0943EE-E526-4643-AC95-9698B5E5C507} = {DB0943EE-E526-4643-AC95-9698B5E5C507}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Frontend", "frontend\Frontend\Frontend.vcxproj", "{DB0943EE-E526-4643-AC95-9698B5E5C507}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Frontend", "frontend\Frontend.vcxproj", "{DB0943EE-E526-4643-AC95-9698B5E5C507}"
 	ProjectSection(ProjectDependencies) = postProject
 		{D3CAEED0-492A-4D42-B475-5A7A883F62BF} = {D3CAEED0-492A-4D42-B475-5A7A883F62BF}
 	EndProjectSection

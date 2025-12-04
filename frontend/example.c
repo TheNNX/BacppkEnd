@@ -9,7 +9,7 @@
 
 #define WASM_EXPORT __attribute__((visibility("default")))
 
-#include "../../WASMDOM/WObject.h"
+#include "WASMDOM/WObject.h"
 
 void* g_ObjectTable[256];
 

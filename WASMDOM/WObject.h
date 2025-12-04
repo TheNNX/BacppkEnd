@@ -31,14 +31,15 @@ struct WPtrIndex
         return WReleaseObject(m_Index, object);
     }
 };
+
+typedef struct WObject
+{
+    
+} WObject;
+
 #else
 void* WRequestObject(WPtrIndex index);
 void  WReleaseObject(WPtrIndex index, void*);
 #endif
-
-typedef struct WObject
-{
-
-} WObject;
 
 #pragma pack(pop)

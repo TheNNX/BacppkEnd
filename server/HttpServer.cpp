@@ -28,16 +28,27 @@ HttpService::HttpService(const std::string& interfce, uint16_t port, InternetPro
 {
     SocketAddress addr = { interfce.c_str(), port };
 
+    switch (port)
+    {
+    case 80:
+        m_Name = "HTTP";
+        break;
+    case 443:
+        m_Name = "HTTPS";
+        break;
+    default:
+        m_Name = ":" + std::to_string(port);
+    }
+
     std::cout << "[*] Binding... ";
     if (!m_ServerSocket.Bind(addr))
     {
         std::cerr << "ERROR" << std::endl << "[!!] Bind failed" << std::endl;
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("Failed to create service");
     }
     std::cout << "OK" << std::endl;
 
     m_ServerSocket.Listen(10);
-
     std::cout << "[*] Listening on [" << addr.host << ':' << addr.port << ']' << std::endl;
 }
 
@@ -57,9 +68,12 @@ std::thread HttpService::Run()
                     std::cout << "[+] New connection: [" << clientAddress.host << ':';
                     std::cout << clientAddress.port << ']' << std::endl;
 
-                    HttpClientWorker worker(
-                        Connection{ std::move(clientSocket), clientAddress, m_SslContext },
-                        *this);
+                    HttpClientWorker worker(Connection
+                                            {
+                                                std::move(clientSocket), 
+                                                clientAddress, m_SslContext
+                                            },
+                                            *this);
                 }
                 catch (const std::runtime_error& rerror)
                 {
@@ -288,14 +302,30 @@ struct LoginApi
 
 int main()
 {
+    //HttpService httpsService = HttpService("0.0.0.0", 43);
+    //httpsService.m_SslContext = std::make_unique<SslContext>("server.crt",
+    //                                                         "server.key");
+    //httpsService.m_Responders["GET"] =
+    //{
+    //    { "/", IndexPage() },
+    //    { "/index.html", Alias(httpsService, "/") },
+    //    { "/robots.txt", FileResponder("robots.txt", "text/plain") },
+    //    { (std::string) StylesheetPath, Styler() }
+    //};
+    //httpsService.m_Responders["POST"] =
+    //{
+    //    { "/api/login", LoginApi() }
+    //};
+    //std::thread t1 = httpsService.Run();
+
     HttpService httpService = HttpService("0.0.0.0", 80);
     httpService.m_Responders["GET"] =
     {
         { "/", IndexPage() },
         { "/index.html", Alias(httpService, "/") },
         { "/upload.html", UploadImagePage() },
-        { "/frontend.wasm", FileResponder("x64/Debug/Frontend.wasm") },
-        { "/loadwasm.js", FileResponder("loadwasm.js") },
+        { "/frontend.wasm", FileResponder("frontend.wasm") },
+        { "/loadwasm.js", FileResponder("loadwasm.js") }
     };
 
     httpService.m_Responders["GET"]["/loadwasm.js"].m_Children["test"] = IndexPage();
@@ -306,8 +336,10 @@ int main()
         { "/uploadFile", UploadFileApi() },
 	};
     httpService.m_GeneralFallbackResponder = Alias(httpService, "/");
+
     std::thread t2 = httpService.Run();
 
+    //t1.join();
     t2.join();
 
     return 0;
