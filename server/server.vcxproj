@@ -159,9 +159,6 @@
     <ClCompile Include="FileResponder.cpp" />
     <ClCompile Include="IndexPage.cpp" />
     <ClCompile Include="UploadApi.cpp" />
-    <ClCompile Include="UploadPage.cpp" />
-    <ClInclude Include="..\WASMDOM\WObject.h" />
-    <ClInclude Include="..\WASMDOM\WPage.hpp" />
     <ClInclude Include="ErrorPage.hpp" />
     <ClInclude Include="FileResponder.hpp" />
     <ClInclude Include="Https.hpp" />
@@ -171,8 +168,6 @@
     <ClInclude Include="HttpServer.hpp" />
     <ClInclude Include="StringHelper.hpp" />
     <ClInclude Include="UploadApi.hpp" />
-    <ClInclude Include="UploadPage.hpp" />
-    <ClInclude Include="WFileTransfer.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Http.hpp" />

@@ -87,13 +87,12 @@ namespace TransferRegistry
         return nextTimeout;
     }
 
-    std::thread CleanupThread = []() -> std::thread&&
+    std::thread CleanupThread = []() -> std::thread
         {
             std::thread t([]()
                 {
                     while (true)
                     {
-                        
                         std::this_thread::sleep_until(GetNextTimeout());
 
                         std::queue<TransferId> toRemove;
@@ -117,7 +116,7 @@ namespace TransferRegistry
                 });
 
             t.detach();
-            return std::move(t);
+            return t;
         }();
 
     std::pair<TransferId, OngoingFileTransfer&> AddTransfer(path path, size_t size)

@@ -19,7 +19,6 @@
 #include "FileResponder.hpp"
 
 #include "IndexPage.hpp"
-#include "UploadPage.hpp"
 #include "ErrorPage.hpp"
 #include "UploadApi.hpp"
 
@@ -322,13 +321,8 @@ int main()
     httpService.m_Responders["GET"] =
     {
         { "/", IndexPage() },
-        { "/index.html", Alias(httpService, "/") },
-        { "/upload.html", UploadImagePage() },
-        { "/frontend.wasm", FileResponder("frontend.wasm") },
-        { "/loadwasm.js", FileResponder("loadwasm.js") }
+        { "/index.html", Alias(httpService, "/") }
     };
-
-    httpService.m_Responders["GET"]["/loadwasm.js"].m_Children["test"] = IndexPage();
 
 	httpService.m_Responders["POST"] = 
 	{

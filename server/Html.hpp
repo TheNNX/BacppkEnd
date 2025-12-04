@@ -477,36 +477,6 @@ inline Tag* Tag::A(const std::string& href, const std::string& content)
     return AddTag(std::move(text));
 }
 
-class TailwindStyleTag : public Tag
-{
-public:
-    std::map<std::string, std::list<std::string>> m_Rules;
-
-    TailwindStyleTag() : Tag("style")
-    {
-        this->AddProperty("type", "text/tailwindcss");
-    }
-
-    std::string GetContentString() override
-    {
-        std::string result = "";
-
-        for (auto rule : m_Rules)
-        {
-            result += rule.first + " {\n";
-
-            for (auto ruleLine : rule.second)
-            {
-                result += "    " + ruleLine;
-            }
-
-            result += "\n}\n";
-        }
-
-        return result;
-    }
-};
-
 class Pseudotag
 {
 public:

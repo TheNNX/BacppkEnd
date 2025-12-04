@@ -13,9 +13,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Pliki nagłówkowe\WASMDOM">
-      <UniqueIdentifier>{9728bd70-b9e6-444b-8aaa-201a06b7af74}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="InetSocketWrapper.cpp">
@@ -33,15 +30,9 @@
     <ClCompile Include="IndexPage.cpp">
       <Filter>Pliki źródłowe</Filter>
     </ClCompile>
-    <ClCompile Include="UploadPage.cpp">
-      <Filter>Pliki źródłowe</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="StringHelper.hpp">
-      <Filter>Pliki nagłówkowe</Filter>
-    </ClInclude>
-    <ClInclude Include="UploadPage.hpp">
       <Filter>Pliki nagłówkowe</Filter>
     </ClInclude>
     <ClInclude Include="Https.hpp">
@@ -69,15 +60,6 @@
       <Filter>Pliki nagłówkowe</Filter>
     </ClInclude>
     <ClInclude Include="FileResponder.hpp">
-      <Filter>Pliki nagłówkowe</Filter>
-    </ClInclude>
-    <ClInclude Include="..\WASMDOM\WObject.h">
-      <Filter>Pliki nagłówkowe\WASMDOM</Filter>
-    </ClInclude>
-    <ClInclude Include="..\WASMDOM\WPage.hpp">
-      <Filter>Pliki nagłówkowe\WASMDOM</Filter>
-    </ClInclude>
-    <ClInclude Include="WFileTransfer.hpp">
       <Filter>Pliki nagłówkowe</Filter>
     </ClInclude>
   </ItemGroup>
