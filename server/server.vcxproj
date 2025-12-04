@@ -158,6 +158,7 @@
   <ItemGroup>
     <ClCompile Include="FileResponder.cpp" />
     <ClCompile Include="IndexPage.cpp" />
+    <ClCompile Include="Page.cpp" />
     <ClCompile Include="UploadApi.cpp" />
     <ClInclude Include="ErrorPage.hpp" />
     <ClInclude Include="FileResponder.hpp" />
@@ -166,6 +167,7 @@
     <ClCompile Include="HttpServer.cpp" />
     <ClCompile Include="InetSocketWrapper.cpp" />
     <ClInclude Include="HttpServer.hpp" />
+    <ClInclude Include="Page.hpp" />
     <ClInclude Include="StringHelper.hpp" />
     <ClInclude Include="UploadApi.hpp" />
   </ItemGroup>
