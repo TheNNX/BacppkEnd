@@ -260,7 +260,6 @@ void HttpClientWorker::WorkerFunction(Connection&& originalConnection)
 
     auto it = std::find(skipMethod.begin(), skipMethod.end(), ' ');
 
-    // TODO: Decode fragment and query parts of the request
     ResourceIdentifier resourceId(std::string(skipMethod.begin(), it));
     std::string protocol = std::string(it + 1, skipMethod.end());
 
@@ -290,14 +289,6 @@ void HttpClientWorker::WorkerFunction(Connection&& originalConnection)
         request.m_Connection.SendString(response.GetResponse());
     }
 }
-
-struct LoginApi
-{
-    HttpResponse operator()(const Request& request)
-    {
-        return ErrorPage(401)(request);
-    }
-};
 
 int main()
 {
