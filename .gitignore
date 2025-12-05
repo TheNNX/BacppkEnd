@@ -2,3 +2,8 @@
 x64
 *.vcxproj.user
 .vs
+server/server
+server/Makefile
+server/cmake_install.cmake
+server/CMakeFiles
+server/CMakeCache.txt

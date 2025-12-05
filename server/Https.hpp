@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <openssl/tls1.h>
 #include <openssl/ssl.h>
 #include "InetSocketWrapper.h"
