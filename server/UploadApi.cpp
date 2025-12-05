@@ -11,30 +11,52 @@
 #include <assert.h>
 #include <queue>
 
+#include "TimedEvent.hpp"
 #include "ErrorPage.hpp"
 
 using namespace std::filesystem;
+using namespace Timed;
+
+struct OngoingFileTransfer;
+
+namespace TransferRegistry
+{
+    using TransferId = int;
+    std::mutex Mutex;
+    std::map<TransferId, std::unique_ptr<OngoingFileTransfer>> Transfers;
+}
 
 struct OngoingFileTransfer
 {
     // TODO: std::weak_ptr<Session*> m_Session;
     path m_Path;
     std::ofstream m_OutStream;
+    std::unique_ptr<TimedEvent> m_Event;
+    const TransferRegistry::TransferId m_Id;
 
     size_t m_SizeTotal = 0;
     size_t m_SizeLeft = 0;
 
-    /* TODO: create a worker to trim this */
-    std::chrono::time_point<std::chrono::file_clock> m_ExpirationDate;
-
     OngoingFileTransfer() = default;
 
-    OngoingFileTransfer(path path, size_t sizeTotal) : 
+    OngoingFileTransfer(TransferRegistry::TransferId id, path path, size_t sizeTotal) : 
         m_OutStream(path, std::ios_base::binary),
         m_SizeTotal(sizeTotal),
-        m_SizeLeft(sizeTotal)
+        m_SizeLeft(sizeTotal),
+        m_Id(id),
+        m_Event(std::make_unique<TimedEvent>(
+            std::chrono::file_clock::now() + std::chrono::hours(1),
+            [transfer = this]()
+            {
+                using namespace TransferRegistry;
+
+                std::lock_guard guard(Mutex);
+
+                auto it = Transfers.find(transfer->m_Id);
+                Transfers.erase(it);
+            }))
     {
-        m_ExpirationDate = std::chrono::file_clock::now() + std::chrono::hours(1);
+        m_Event->AddEvent();
     }
 
     void Append(std::string_view data)
@@ -48,77 +70,10 @@ struct OngoingFileTransfer
 
         m_OutStream.write(data.data(), data.size());
     }
-
-    bool IsExpired() const
-    {
-        return std::chrono::file_clock::now() > m_ExpirationDate;
-    }
 };
 
 namespace TransferRegistry 
 {
-    using TransferId = int;
-    std::map<TransferId, OngoingFileTransfer> Transfers;
-    std::mutex Mutex;
-
-    auto GetNextTimeout()
-    {
-        std::lock_guard lock(Mutex);
-
-        /* If there are no ongnoing transfers, wait for one minute. 
-           TODO: This should probably wait on a semaphore instead,
-           though it's not very critical code. */
-        if (Transfers.size() == 0)
-        {
-            return std::chrono::file_clock::now() + std::chrono::minutes(1);
-        }
-
-        decltype(OngoingFileTransfer::m_ExpirationDate) nextTimeout =
-            Transfers.begin()->second.m_ExpirationDate;
-
-        for (auto& transfer : Transfers)
-        {
-            if (transfer.second.m_ExpirationDate < nextTimeout)
-            {
-                nextTimeout = transfer.second.m_ExpirationDate;
-            }
-        }
-
-        return nextTimeout;
-    }
-
-    std::thread CleanupThread = []() -> std::thread
-        {
-            std::thread t([]()
-                {
-                    while (true)
-                    {
-                        std::this_thread::sleep_until(GetNextTimeout());
-
-                        std::queue<TransferId> toRemove;
-
-                        std::lock_guard lock(Mutex);
-                        for (auto it = Transfers.begin(); it != Transfers.end(); it++)
-                        {
-                            if (it->second.IsExpired())
-                            {
-                                toRemove.push(it->first);
-                            }
-                        }
-
-                        while (toRemove.empty() == false)
-                        {
-                            auto key = toRemove.front();
-                            Transfers.erase(key);
-                            toRemove.pop();
-                        }
-                    }
-                });
-
-            t.detach();
-            return t;
-        }();
-
     std::pair<TransferId, OngoingFileTransfer&> AddTransfer(path path, size_t size)
     {
         std::scoped_lock lock(Mutex);
@@ -127,11 +82,11 @@ namespace TransferRegistry
         do
         {
             id = rand();
-        } 
+        }
         while (id == 0 || Transfers.count(id) > 0);
-    
-        Transfers[id] = OngoingFileTransfer(path, size);
-        return std::pair<TransferId, OngoingFileTransfer&>(id, Transfers[id]);
+
+        Transfers.insert(std::make_pair(id, std::make_unique<OngoingFileTransfer>(id, path, size)));
+        return std::pair<TransferId, OngoingFileTransfer&>(id, *Transfers[id]);
     }
 };
 
@@ -153,11 +108,7 @@ HttpResponse UploadFileApi::operator()(const Request& request)
     }
 
     auto it = TransferRegistry::Transfers.find(id);
-    auto& transfer = it->second;
-    if (transfer.IsExpired())
-    {
-        TransferRegistry::Transfers.erase(it);
-    }
+    auto& transfer = *it->second.get();
 
     size_t step = std::min(request.m_Body.size(), transfer.m_SizeLeft);
 
@@ -167,6 +118,7 @@ HttpResponse UploadFileApi::operator()(const Request& request)
     transfer.m_OutStream.flush();
     if (transfer.m_SizeLeft == 0)
     {
+        transfer.m_Event->Cancel();
         TransferRegistry::Transfers.erase(it);
     }
 

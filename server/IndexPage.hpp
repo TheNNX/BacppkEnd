@@ -6,6 +6,6 @@ struct IndexPage : public Page
 {
     virtual ~IndexPage() = default;
 
-    void GenerateContent(Tag* contentContainer);
+    void GenerateContent(const Request& request, Tag* contentContainer) override;
     std::list<std::pair<std::string, std::string>> GetNavbar() const;
 };

@@ -252,6 +252,14 @@ public:
         return AddTag(std::make_unique<Tag>("form"));
     }
 
+    Tag* Form(const std::string& action)
+    {
+        auto result = AddTag(std::make_unique<Tag>("form"));
+        result->AddProperty("action", action);
+
+        return result;
+    }
+
     Tag* Input(const std::string& type, const std::string& name, const std::string& value = "")
     {
         /* TODO: id= */

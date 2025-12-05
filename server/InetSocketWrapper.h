@@ -31,6 +31,7 @@
 
 #ifdef _WIN32
 
+#include <mutex>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -61,17 +62,6 @@ namespace InetSocketWrapper
 
 #ifdef _WIN32
     typedef SOCKET SocketDescriptor;
-
-    class WsaReference
-    {
-        static int wsaReferenced;
-        static WSADATA wsaData;
-    public:
-        WsaReference();
-        ~WsaReference();
-        WsaReference(const WsaReference&);
-    };
-
 #else
     typedef int SocketDescriptor;
 #endif
@@ -106,15 +96,26 @@ namespace InetSocketWrapper
         SocketDescriptor sockfd = -1;
     private:
 #ifdef _WIN32
+        class WsaReference
+        {
+            static int WsaReferenced;
+            static WSADATA WsaData;
+            static std::mutex WsaMutex;
+        public:
+            WsaReference();
+            ~WsaReference();
+            WsaReference(const WsaReference&);
+        private:
+            void Referenced();
+        };
+
         WsaReference wsaReference;
 #endif
 
-        // tworzenie gniazda do odbierania
-        bool BindToAddress(const char* host, const char* port);
+        void BindToAddress(const char* host, const char* port);
 
 
-        // tworzenie gniazda do wysylania
-        bool ConnectToRemote(const char* addr, const char* port);
+        void ConnectToRemote(const char* addr, const char* port);
 
 
         sockaddr* GetRemoteHostInfo(const char* addr, const char* port);
@@ -133,6 +134,9 @@ namespace InetSocketWrapper
 
 
         SocketDescriptor Accept(sockaddr* addr, socklen_t& addrlen);
+
+
+        static void CloseFd(SocketDescriptor fd);
 
     public:
 
@@ -157,10 +161,10 @@ namespace InetSocketWrapper
         bool CreateSocketDescriptor();
 
 
-        bool Bind(SocketAddress addr);
+        void Bind(SocketAddress addr);
 
 
-        bool Connect(SocketAddress addr);
+        void Connect(SocketAddress addr);
 
 
         void Listen(int backlog);
@@ -202,7 +206,7 @@ namespace InetSocketWrapper
         void DisableNagle();
 
 
-        auto GetNativeDescriptor() const
+        auto GetNativeDescriptor() noexcept
         {
             return this->sockfd;
         }
@@ -211,11 +215,10 @@ namespace InetSocketWrapper
     class InetListenSocket : public InetSocket
     {
     public:
-        InetListenSocket(
-            const std::string& ip,
-            uint16_t port,
-            InternetProtocol protocol,
-            SocketType type,
-            int backlog = 10);
+        InetListenSocket(const std::string& ip,
+                         uint16_t port,
+                         InternetProtocol protocol,
+                         SocketType type,
+                         int backlog = 10);
     };
 }

@@ -39,7 +39,7 @@ HttpResponse Page::operator()(const Request& request)
                 GetTitle(),
                 [&](Tag* contentContainer)
                 {
-                    this->GenerateContent(contentContainer);
+                    this->GenerateContent(request, contentContainer);
                 }));
 
     return HttpResponse(html->Emit(), GetStatus(), "text/html");

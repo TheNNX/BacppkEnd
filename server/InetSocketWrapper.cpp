@@ -45,7 +45,7 @@
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
-#define close(x) closesocket(x)
+// #define close(x) closesocket(x)
 
 #ifdef gai_strerror
 #undef gai_strerror
@@ -57,8 +57,14 @@ static std::string GetLastStringError()
     return std::to_string(WSAGetLastError());
 }
 
-WSADATA InetSocketWrapper::WsaReference::wsaData = { 0 };
-int InetSocketWrapper::WsaReference::wsaReferenced = 0;
+static bool IsFdValid(InetSocketWrapper::SocketDescriptor fd)
+{
+    return fd != INVALID_SOCKET;
+}
+
+WSADATA InetSocketWrapper::InetSocket::WsaReference::WsaData = { 0 };
+int InetSocketWrapper::InetSocket::WsaReference::WsaReferenced = 0;
+std::mutex InetSocketWrapper::InetSocket::WsaReference::WsaMutex = std::mutex();
 
 #else
 #include <sys/types.h>
@@ -72,15 +78,24 @@ static std::string GetLastStringError()
 {
     return std::string(strerror(errno));
 }
+
+static bool IsFdValid(InetSocketWrapper::SocketDescriptor fd)
+{
+    return fd >= 0;
+}
+
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET -1
+#endif
+
 #endif
 
 namespace InetSocketWrapper
 {
     // tworzenie gniazda do odbierania
-    bool InetSocket::BindToAddress(const char* host, const char* port)
+    void InetSocket::BindToAddress(const char* host, const char* port)
     {
-        if (this->sockfd > 0)
-            close(this->sockfd);
+        this->Close();
 
         struct addrinfo hints, * result, * p;
 
@@ -104,8 +119,10 @@ namespace InetSocketWrapper
         for (p = result; p != NULL; p = p->ai_next)
         {
             this->sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-            if (this->sockfd < 0) /* utworzenie gniazda do odbierania */
+            if (!IsFdValid(this->sockfd))
+            {
                 continue;
+            }
 
             int reuse = 1;
             if (setsockopt(this->sockfd, SOL_SOCKET, SO_REUSEADDR, (char*) &reuse, sizeof(reuse)) < 0)
@@ -115,32 +132,26 @@ namespace InetSocketWrapper
                 throw std::runtime_error(err);
             }
 
-
-            /* powiazanie gniazda z adresem IP i portem */
             if (bind(this->sockfd, p->ai_addr, p->ai_addrlen) == 0)
             {
                 break;
             }
 
-            close(this->sockfd);
+            this->Close();
         }
 
         if (p == NULL)
         {
             freeaddrinfo(result);
-            return false;
+            throw std::runtime_error("Bind attempts failed on all getaddrinfo results");
         }
 
         freeaddrinfo(result);
-
-        return true;
     }
 
-    // tworzenie gniazda do wysylania
-    bool InetSocket::ConnectToRemote(const char* addr, const char* port)
+    void InetSocket::ConnectToRemote(const char* addr, const char* port)
     {
-        if (this->sockfd > 0)
-            close(this->sockfd);
+        this->Close();
 
         struct addrinfo hints, * result, * p;
 
@@ -161,26 +172,26 @@ namespace InetSocketWrapper
         for (p = result; p != NULL; p = p->ai_next)
         {
             this->sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-            if (this->sockfd < 0) /* utworzenie gniazda do wysylania */
+            if (!IsFdValid(this->sockfd))
+            {
                 continue;
+            }
 
             if (connect(this->sockfd, p->ai_addr, p->ai_addrlen) == 0)
             {
                 break;
             }
 
-            close(this->sockfd);
+            this->Close();
         }
 
         if (p == NULL)
         {
             freeaddrinfo(result);
-            return false;
+            throw std::runtime_error("Connect attempts failed on all getaddrinfo results");
         }
 
         freeaddrinfo(result);
-
-        return true;
     }
 
     sockaddr* InetSocket::GetRemoteHostInfo(const char* addr, const char* port)
@@ -195,6 +206,11 @@ namespace InetSocketWrapper
         {
             reslen = sizeof(sockaddr_in6);
         }
+        else
+        {
+            assert(false);
+        }
+
         sockaddr* res = (sockaddr*) malloc(reslen);
         if (res == NULL)
         {
@@ -220,17 +236,19 @@ namespace InetSocketWrapper
         for (p = result; p != NULL; p = p->ai_next)
         {
             SocketDescriptor sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-            if (sock < 0) /* utworzenie gniazda do wysylania */
+            if (!IsFdValid(sock))
+            {
                 continue;
+            }
 
             if (connect(sock, p->ai_addr, p->ai_addrlen) == 0)
             {
                 memcpy(res, p->ai_addr, p->ai_addrlen);
-                close(sock);
+                CloseFd(sock);
                 break;
             }
 
-            close(sock);
+            CloseFd(sock);
         }
 
         freeaddrinfo(result);
@@ -250,6 +268,7 @@ namespace InetSocketWrapper
         {
             eof = true;
         }
+        
         return n;
     }
 
@@ -326,21 +345,14 @@ namespace InetSocketWrapper
         }
     }
 
-    InetListenSocket::InetListenSocket(
-        const std::string& ip,
-        uint16_t port,
-        InternetProtocol protocol,
-        SocketType type,
-        int backlog) :
+    InetListenSocket::InetListenSocket(const std::string& ip,
+                                       uint16_t port,
+                                       InternetProtocol protocol,
+                                       SocketType type,
+                                       int backlog) :
         InetSocket(protocol, type)
     {
-        if (!Bind(SocketAddress{ ip, port }))
-        {
-            close(this->sockfd);
-            this->sockfd = INVALID_SOCKET;
-            throw std::runtime_error("");
-        }
-
+        Bind(SocketAddress{ ip, port });
         Listen(backlog);
     }
 
@@ -362,13 +374,12 @@ namespace InetSocketWrapper
     bool InetSocket::CreateSocketDescriptor()
     {
         SocketDescriptor sock = socket(this->domain, this->type, this->protocol);
-        if (sock < 0)
+        if (!IsFdValid(sock))
         {
-            return false;
+            throw std::runtime_error("socket: " + GetLastStringError());
         }
 
         this->sockfd = sock;
-        return true;
     }
 
     bool InetSocket::CheckDataReady()
@@ -385,13 +396,13 @@ namespace InetSocketWrapper
         return active != 0;
     }
 
-    bool InetSocket::Bind(SocketAddress addr)
+    void InetSocket::Bind(SocketAddress addr)
     {
-        return BindToAddress(addr.host.c_str(), 
-                             std::to_string((unsigned)addr.port).c_str());
+        BindToAddress(addr.host.c_str(), 
+                      std::to_string((unsigned)addr.port).c_str());
     }
 
-    bool InetSocket::Connect(SocketAddress addr)
+    void InetSocket::Connect(SocketAddress addr)
     {
         return ConnectToRemote(addr.host.c_str(), 
                                std::to_string((unsigned)addr.port).c_str());
@@ -408,8 +419,17 @@ namespace InetSocketWrapper
 
     void InetSocket::Close()
     {
-        close(this->sockfd);
-        sockfd = -1;
+        CloseFd(this->sockfd);
+        sockfd = INVALID_SOCKET;
+    }
+
+    void InetSocket::CloseFd(SocketDescriptor descriptor)
+    {
+#ifdef _WIN32
+        closesocket(descriptor);
+#else
+        close(descriptor);
+#endif
     }
 
     InetSocket InetSocket::AcceptConnection(SocketAddress& ClientAddress)
@@ -501,6 +521,10 @@ namespace InetSocketWrapper
             free(addr);
             return n;
         }
+        else
+        {
+            assert(false);
+        }
 
         return -1;
     }
@@ -541,6 +565,10 @@ namespace InetSocketWrapper
             source.host = s;
             source.port = ntohs(addr.sin6_port);
         }
+        else
+        {
+            assert(false);
+        }
 
         return n;
     }
@@ -554,7 +582,7 @@ namespace InetSocketWrapper
 
     bool InetSocket::Bad()
     {
-        return this->sockfd < 0;
+        return !IsFdValid(this->sockfd);
     }
 
     bool InetSocket::Eof()
@@ -563,12 +591,38 @@ namespace InetSocketWrapper
     }
 
 #ifdef _WIN32
-    WsaReference::WsaReference()
+    InetSocket::WsaReference::WsaReference()
     {
-        if (wsaReferenced == 0)
+        std::lock_guard guard(WsaMutex);
+
+        Referenced();
+    }
+
+    InetSocket::WsaReference::~WsaReference()
+    {
+        std::lock_guard guard(WsaMutex);
+
+        assert(WsaReferenced > 0);
+        WsaReferenced--;
+        if (WsaReferenced == 0)
+        {
+            WSACleanup();
+        }
+    }
+
+    InetSocket::WsaReference::WsaReference(const InetSocket::WsaReference&)
+    {
+        std::lock_guard guard(WsaMutex);
+
+        Referenced();
+    }
+
+    void InetSocket::WsaReference::Referenced()
+    {
+        if (WsaReferenced == 0)
         {
             int err;
-            err = WSAStartup(MAKEWORD(2, 2), &wsaData);
+            err = WSAStartup(MAKEWORD(2, 2), &WsaData);
             if (err != 0)
             {
                 std::string error = std::string("WSAStartup failed with error: ");
@@ -576,29 +630,17 @@ namespace InetSocketWrapper
                 throw std::runtime_error(error.c_str());
             }
         }
-        wsaReferenced++;
-    }
-
-    WsaReference::~WsaReference()
-    {
-        assert(wsaReferenced > 0);
-        wsaReferenced--;
-        if (wsaReferenced == 0)
-        {
-            WSACleanup();
-        }
-    }
-
-    WsaReference::WsaReference(const WsaReference&)
-    {
-        wsaReferenced++;
+        WsaReferenced++;
     }
 
     void InetSocket::DisableNagle()
     {
         int yes = 1;
         int result = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*) &yes, sizeof(int));
-        /* TODO */
+        if (result < 0)
+        {
+            throw std::runtime_error("setsockopt: " + GetLastStringError());
+        }
     }
 #endif
 }

@@ -156,10 +156,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Connection.cpp" />
+    <ClCompile Include="ErrorPage.cpp" />
     <ClCompile Include="FileResponder.cpp" />
+    <ClCompile Include="Http.cpp" />
     <ClCompile Include="IndexPage.cpp" />
+    <ClCompile Include="LoginApi.cpp" />
+    <ClCompile Include="LoginPage.cpp" />
     <ClCompile Include="Page.cpp" />
+    <ClCompile Include="TimedEvent.cpp" />
     <ClCompile Include="UploadApi.cpp" />
+    <ClInclude Include="Connection.hpp" />
     <ClInclude Include="ErrorPage.hpp" />
     <ClInclude Include="FileResponder.hpp" />
     <ClInclude Include="Https.hpp" />
@@ -167,8 +174,11 @@
     <ClCompile Include="HttpServer.cpp" />
     <ClCompile Include="InetSocketWrapper.cpp" />
     <ClInclude Include="HttpServer.hpp" />
+    <ClInclude Include="LoginApi.hpp" />
+    <ClInclude Include="LoginPage.hpp" />
     <ClInclude Include="Page.hpp" />
     <ClInclude Include="StringHelper.hpp" />
+    <ClInclude Include="TimedEvent.hpp" />
     <ClInclude Include="UploadApi.hpp" />
   </ItemGroup>
   <ItemGroup>

@@ -9,7 +9,7 @@ struct UploadApi
     HttpResponse operator()(const Request& request);
 
     std::filesystem::path m_ServerUploadDirectory =
-#ifndef WIN32
+#ifndef _WIN32
         absolute("/mnt/data/shared/upload");
 #else
         std::filesystem::absolute("upload");

@@ -46,9 +46,8 @@ private:
 
 struct SslConnection
 {
-    SslConnection(
-        const SslContext& context, 
-        const InetSocketWrapper::InetSocket& clientSocket)
+    SslConnection(const SslContext& context, 
+                  InetSocketWrapper::InetSocket& clientSocket)
     {
         m_Ssl = SSL_new(context.m_Ctx);
 

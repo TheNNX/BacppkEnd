@@ -25,7 +25,7 @@ struct Page
     };
 
     HttpResponse operator()(const Request& request);
-    virtual void GenerateContent(Tag* contentContainer) = 0;
+    virtual void GenerateContent(const Request& request, Tag* contentContainer) = 0;
     virtual std::string GetTitle() const;
     virtual int GetStatus();
 };

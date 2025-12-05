@@ -23,11 +23,11 @@ inline std::vector<std::string> SplitString(const std::string& s, char separator
 
 inline std::string Trim(std::string value)
 {
-    while (value.starts_with(' '))
+    while (std::isspace(value[0]))
     {
         value = value.substr(1);
     }
-    while (value.ends_with(' '))
+    while (std::isspace(value[value.length() - 1]))
     {
         value = value.substr(0, value.length() - 1);
     }

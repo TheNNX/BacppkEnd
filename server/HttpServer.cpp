@@ -1,4 +1,5 @@
-#include "Http.hpp"
+#include "HttpServer.hpp"
+
 #include <iostream>
 #include <string>
 #include <stdlib.h>
@@ -14,13 +15,15 @@
 
 #include "Html.hpp"
 #include "InetSocketWrapper.h"
-
-#include "HttpServer.hpp"
+#include "Http.hpp"
+#include "Connection.hpp"
 #include "FileResponder.hpp"
-
 #include "IndexPage.hpp"
 #include "ErrorPage.hpp"
 #include "UploadApi.hpp"
+#include "LoginApi.hpp"
+#include "LoginPage.hpp"
+#include "StringHelper.hpp"
 
 HttpService::HttpService(const std::string& interfce, uint16_t port, InternetProtocol protocol) :
     m_ServerSocket(protocol, TCP)
@@ -39,13 +42,8 @@ HttpService::HttpService(const std::string& interfce, uint16_t port, InternetPro
         m_Name = ":" + std::to_string(port);
     }
 
-    std::cout << "[*] Binding... ";
-    if (!m_ServerSocket.Bind(addr))
-    {
-        std::cerr << "ERROR" << std::endl << "[!!] Bind failed" << std::endl;
-        throw std::runtime_error("Failed to create service");
-    }
-    std::cout << "OK" << std::endl;
+    std::cout << "[*] Binding...\n";
+    m_ServerSocket.Bind(addr);
 
     m_ServerSocket.Listen(10);
     std::cout << "[*] Listening on [" << addr.host << ':' << addr.port << ']' << std::endl;
@@ -93,7 +91,9 @@ HttpResponse HttpService::GetResponse(const Request& request) const
     assert(request.m_ResourceId.GetPathParts().size() > 0);
     std::vector<std::string> pathParts = request.m_ResourceId.GetPathParts();
 
-    std::cout << "[G] " << request.m_Method << " Request for " + request.m_ResourceId.m_Path + " using " << request.m_Protocol << "\n";
+    std::cout << "[G] " << request.m_Method 
+              << " Request for " + request.m_ResourceId.m_Path + " using " 
+              << request.m_Protocol << "\n";
 
     if (m_Responders.count(request.m_Method) == 0)
     {
@@ -107,9 +107,10 @@ HttpResponse HttpService::GetResponse(const Request& request) const
 
     auto responderIt = m_Responders.at(request.m_Method).find(pathParts[0]);
 
-    const Responder* responder = responderIt == m_Responders.at(request.m_Method).end() ?
-        nullptr : 
-        &responderIt->second;
+    const Responder* responder = 
+        responderIt == m_Responders.at(request.m_Method).end() ?
+            nullptr : 
+            &responderIt->second;
 
     for (size_t i = 1; i < pathParts.size() && responder != nullptr; i++)
     {
@@ -134,43 +135,6 @@ HttpResponse HttpService::GetResponse(const Request& request) const
     {
         return ErrorPage(500)(request);
     }
-}
-
-ResourceIdentifier::ResourceIdentifier(const std::string& ri)
-{
-    auto queryIt = std::find(ri.begin(), ri.end(), '?');
- 
-    std::string queryString;
-
-    m_Path = std::string(ri.begin(), queryIt);
-    if (queryIt == ri.end())
-    {
-        return;
-    }
-
-    queryString = std::string(queryIt + 1, ri.end());
-
-    auto queryParts = SplitString(queryString, '&');
-    for (auto& queryPart : queryParts)
-    {
-        std::string key, value;
-        auto eqSignIt = std::find(queryPart.begin(), queryPart.end(), '=');
-
-        if (eqSignIt == queryPart.end())
-        {
-            value = "";
-            key = queryPart;
-        }
-        else 
-        {
-            value = std::string(eqSignIt + 1, queryPart.end());
-            key = std::string(queryPart.begin(), eqSignIt);
-        }
-
-        m_Query[key].push_back(value);
-    }
-
-    std::cout << m_Query.size() << " query keys\n";
 }
 
 void HttpClientWorker::WorkerFunction(Connection&& originalConnection)
@@ -225,7 +189,14 @@ void HttpClientWorker::WorkerFunction(Connection&& originalConnection)
             name = Trim(name);
             value = Trim(value);
 
-            headerMap[name] = value;
+            if (headerMap.contains(name))
+            {
+                headerMap[name] += "; " + value;
+            }
+            else
+            {
+                headerMap[name] = value;
+            }
 
             if (name == "Content-Length")
             {
@@ -308,24 +279,33 @@ int main()
     //};
     //std::thread t1 = httpsService.Run();
 
-    HttpService httpService = HttpService("0.0.0.0", 80);
-    httpService.m_Responders["GET"] =
+    try
     {
-        { "/", IndexPage() },
-        { "/index.html", Alias(httpService, "/") }
-    };
+        HttpService httpService = HttpService("0.0.0.0", 80);
+        httpService.m_Responders["GET"] =
+        {
+            { "/", IndexPage() },
+            { "/index.html", Alias(httpService, "/") },
+            { "/login", LoginPage() }
+        };
 
-	httpService.m_Responders["POST"] = 
-	{
-		{ "/upload", UploadApi() },
-        { "/uploadFile", UploadFileApi() },
-	};
-    httpService.m_GeneralFallbackResponder = Alias(httpService, "/");
+        httpService.m_Responders["POST"] =
+        {
+            { "/upload", UploadApi() },
+            { "/uploadFile", UploadFileApi() },
+            { "/login", LoginApi() },
+        };
+        httpService.m_GeneralFallbackResponder = Alias(httpService, "/");
 
-    std::thread t2 = httpService.Run();
+        std::thread t2 = httpService.Run();
 
-    //t1.join();
-    t2.join();
+        //t1.join();
+        t2.join();
+    }
+    catch (const std::runtime_error& error)
+    {
+        std::cerr << error.what() << "\n";
+    }
 
     return 0;
 }
